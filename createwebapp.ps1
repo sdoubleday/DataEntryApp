@@ -140,6 +140,74 @@ Get-ChildItem $relpath | ForEach-Object {
     dotnet aspnet-codegenerator razorpage -m $($_.BaseName) -dc $qualifiedDbContextName -udl -outDir "$($relpath_Pages)\$($_.BaseName)" –referenceScriptLibraries --namespaceName "$namespaceTrunk.$($_.BaseName)s" ;
 } <# END Get-ChildItem $relpath | ForEach-Object #>
 
+$startupcontent = Get-Content -Raw .\startup.cs;
+Set-Content -Path .\startup.cs -Encoding UTF8 -Value $startupcontent.Replace('services.AddRazorPages();',"services.AddRazorPages();`r`n            services.AddDbContext<$qualifiedDbContextName>();");
+
+dotnet build;
+
+dotnet publish --configuration Release;
+
+#. .\bin\Release\net5.0\MyWebApp.exe
+#### ... to start a debug version. It runs in the console, and echos a port. you can find the data entry interface at: localhost:5001/$CrudSchema/CsvFileNameNoExtension
+#### and that's nice, and all, but we really need an actual landing page that has a list of the available data entry interfaces
+#### and it needs to actually run somewhere. IIS? Kestrel?
+
 
 #FIGURE OUT HOW TO TURN ON IIS AND DEPLOY THE WEBAPP TO IT
 #THEN LAUNCH A BROWSER POINTED AT THE WEBAPP
+
+#Turn on IIS
+Install-WindowsFeature -Name Web-Server -IncludeManagementTools;
+
+#I think this is the right hosting bundle? Yes, I know it is 6.0, but it seems to be backwards compatible.
+#We need THIS https://download.visualstudio.microsoft.com/download/pr/eaa3eab9-cc21-44b5-a4e4-af31ee73b9fa/d8ad75d525dec0a30b52adc990796b11/dotnet-hosting-6.0.9-win.exe
+ 
+# we maybe need 6.0.9? which may or may not be what comes from here? ANyway, it looks like this needs to be repaired by the above, for now.
+choco install dotnet-6.0-windowshosting -y;
+#bouncing...
+net stop was /y;
+net start w3svc;
+
+#Deploy the webapp to the physical path where it will live
+$dir = New-Item -ItemType Directory -Path C:\inetpub\wwwroot\$WebAppName;
+Get-ChildItem .\bin\Release\net5.0\publish\ | Copy-Item -Recurse -Destination $dir;
+
+#Grant the IIS service account access to the data entry database
+New-DbaLogin -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
+New-DbaDbUser -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
+#Look, I didn't say this uses the principle of least permissions.
+Add-DbaDbRoleMember -Database $DatabaseName -Role 'db_owner' -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -User 'IIS APPPOOL\DefaultAppPool';
+
+#At this point, either manually create the webapp in IIS Manager or proceed...
+
+#Point the IIS stuff at the file stuff to voila-make-a-webapp. Does that need me to be in the IIS provider? Or does it work from normal powershell?
+#IIS:\> 
+Install-Module IISAdministration;
+Import-Module WebAdministration; #need that for the IIS: provider
+#switch to IIS, make the webapp happen, then switch back to normal file system.
+IIS:
+New-Item "IIS:\Sites\Default Web Site\$WebAppName" -physicalPath "C:\inetpub\wwwroot\$WebAppName\" -type Application
+C:
+
+#Then put this into a web browser
+echo "localhost/$WebAppName"
+
+#Leftovers
+
+#Bits for hosting a dotnetcore webapp... maybe? Might need to bounce the service.
+choco install dotnetcore-windowshosting -y;
+#bouncing...
+net stop was /y;
+net start w3svc;
+
+#or maybe this?
+choco install dotnet-5.0-windowshosting -y;
+#bouncing...
+net stop was /y;
+net start w3svc;
+
+
+#Downloading and running this and then bouncing the service and deploying the app manually (Create a folder in c:\inetpub\wwwroot\ and then ls ...publish\ | copy -recurse to that folder) worked to make a functional webconfig but the data entry page threw an error (prolly need to turn on development mode:
+# https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-aspnetcore-6.0.9-windows-hosting-bundle-installer)
+
+

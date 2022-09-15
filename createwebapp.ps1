@@ -14,7 +14,9 @@ PARAM(
 [String]$DirectoryOfCsvFiles = '.\Documents\csv'
 $CrudSchema = $WebAppName + "Schema";
 
-New-Item -ItemType Directory $DirectoryOfCsvFiles -Force | ii; #Paste csv file here
+New-Item -ItemType Directory $DirectoryOfCsvFiles -Force | Out-Null; #Paste csv file here
+New-Item -ItemType File $DirectoryOfCsvFiles\sampleTable.csv | Add-Content -Encoding UTF8 -Value "col1,col2,col3`r`n1234,qwer,asdf`r`nfdsa,rewq,4321";
+New-Item -ItemType File $DirectoryOfCsvFiles\exampleTable.csv | Add-Content -Encoding UTF8 -Value "colA,colB,colC`r`nZ1234,Zqwer,Zasdf`r`nYfdsa,Yrewq,Y4321";
 
 #region PowerShell and Package Managers
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force;
@@ -136,12 +138,20 @@ $qualifiedDbContextName = $projname + '.Data.' + $dbcontextname;
 $namespaceTrunk = $projname + '.Pages.' + $CrudSchema;
 #Explanation: You need to change the namespace from the unpluralized version because otherwise the .cshtml.cs code tries to refernce the un-qualified class name, which collides with its unqualified namespace. Changing the namespace at generator time is easier than getting the generator to fully qualify its use of the class.
 
+$htmlListOfPages = "";
 Get-ChildItem $relpath | ForEach-Object {
     dotnet aspnet-codegenerator razorpage -m $($_.BaseName) -dc $qualifiedDbContextName -udl -outDir "$($relpath_Pages)\$($_.BaseName)" –referenceScriptLibraries --namespaceName "$namespaceTrunk.$($_.BaseName)s" ;
+    $htmlListOfPages = $htmlListOfPages + '<a class="navbar-brand" asp-page="/' + $CrudSchema + '/' + $_.BaseName + '/Index">' + $_.BaseName + '</a>' + "`r`n        ";
 } <# END Get-ChildItem $relpath | ForEach-Object #>
 
+#Update the startup cs code to connect to the database.
 $startupcontent = Get-Content -Raw .\startup.cs;
 Set-Content -Path .\startup.cs -Encoding UTF8 -Value $startupcontent.Replace('services.AddRazorPages();',"services.AddRazorPages();`r`n            services.AddDbContext<$qualifiedDbContextName>();");
+
+#Update the home page with all the data entry pages.
+$homecontent = Get-Content -Raw .\Pages\Index.cshtml;
+Set-Content -Path .\Pages\Index.cshtml -Encoding UTF8 -Value $homecontent.Replace('<p>Learn about <a href="https://docs.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>'
+    ,$htmlListOfPages);
 
 dotnet build;
 
@@ -159,14 +169,6 @@ dotnet publish --configuration Release;
 #Turn on IIS
 Install-WindowsFeature -Name Web-Server -IncludeManagementTools;
 
-#I think this is the right hosting bundle? Yes, I know it is 6.0, but it seems to be backwards compatible.
-#We need THIS https://download.visualstudio.microsoft.com/download/pr/eaa3eab9-cc21-44b5-a4e4-af31ee73b9fa/d8ad75d525dec0a30b52adc990796b11/dotnet-hosting-6.0.9-win.exe
- 
-# we maybe need 6.0.9? which may or may not be what comes from here? ANyway, it looks like this needs to be repaired by the above, for now.
-choco install dotnet-6.0-windowshosting -y;
-#bouncing...
-net stop was /y;
-net start w3svc;
 
 #Deploy the webapp to the physical path where it will live
 $dir = New-Item -ItemType Directory -Path C:\inetpub\wwwroot\$WebAppName;
@@ -176,10 +178,27 @@ Get-ChildItem .\bin\Release\net5.0\publish\ | Copy-Item -Recurse -Destination $d
 New-DbaLogin -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
 New-DbaDbUser -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
 #Look, I didn't say this uses the principle of least permissions.
-Add-DbaDbRoleMember -Database $DatabaseName -Role 'db_owner' -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -User 'IIS APPPOOL\DefaultAppPool';
+Add-DbaDbRoleMember -Database $DatabaseName -Role 'db_owner' -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -User 'IIS APPPOOL\DefaultAppPool' -confirm:$false;
+
+#I think this is the right hosting bundle? Yes, I know it is 6.0, but it seems to be backwards compatible.
+$url = 'https://download.visualstudio.microsoft.com/download/pr/eaa3eab9-cc21-44b5-a4e4-af31ee73b9fa/d8ad75d525dec0a30b52adc990796b11/dotnet-hosting-6.0.9-win.exe';
+$file = 'outfile.exe';
+Invoke-WebRequest -Uri $url -OutFile $file;
+Start-Process -FilePath $file -Wait -ArgumentList "/quiet","/install";
+net stop was /y;
+net start w3svc;
+Start-Process -FilePath $file -Wait -ArgumentList "/quiet","/repair"; #This seems to require a repair command, and I have no idea why.
+net stop was /y;
+net start w3svc;
+# we maybe need 6.0.9? which may or may not be what comes from here? ANyway, it looks like this needs to be repaired by the above, for now.
+#choco install dotnet-6.0-windowshosting -y;
+#bouncing...
+#net stop was /y;
+#net start w3svc;
 
 #At this point, either manually create the webapp in IIS Manager or proceed...
 
+Set-PSRepository -Name PSGallery -InstallationPolicy Trusted;
 #Point the IIS stuff at the file stuff to voila-make-a-webapp. Does that need me to be in the IIS provider? Or does it work from normal powershell?
 #IIS:\> 
 Install-Module IISAdministration;
@@ -189,22 +208,24 @@ IIS:
 New-Item "IIS:\Sites\Default Web Site\$WebAppName" -physicalPath "C:\inetpub\wwwroot\$WebAppName\" -type Application
 C:
 
-#Then put this into a web browser
-echo "localhost/$WebAppName"
+#Pretty sure that either the hosting bundle should get installed at this point or the install should work or SOMETHING but if we repair the installation after the creation of the webapp, that seems to work.
+
+#Then launch a web browser
+Start-Process msedge "localhost/$WebAppName";
 
 #Leftovers
 
 #Bits for hosting a dotnetcore webapp... maybe? Might need to bounce the service.
-choco install dotnetcore-windowshosting -y;
+#choco install dotnetcore-windowshosting -y;
 #bouncing...
-net stop was /y;
-net start w3svc;
+#net stop was /y;
+#net start w3svc;
 
 #or maybe this?
-choco install dotnet-5.0-windowshosting -y;
+#choco install dotnet-5.0-windowshosting -y;
 #bouncing...
-net stop was /y;
-net start w3svc;
+#net stop was /y;
+#net start w3svc;
 
 
 #Downloading and running this and then bouncing the service and deploying the app manually (Create a folder in c:\inetpub\wwwroot\ and then ls ...publish\ | copy -recurse to that folder) worked to make a functional webconfig but the data entry page threw an error (prolly need to turn on development mode:

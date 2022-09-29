@@ -263,4 +263,4 @@ net start w3svc;
 
 
 #Then launch a web browser
-#Start-Process msedge "localhost/$WebAppName";
+Start-Process msedge "localhost/$WebAppName";

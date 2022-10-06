@@ -1,6 +1,5 @@
 ﻿
-#region one-time setup. Install packages and install SQL Server.
-[String]$DatabaseName = 'DataEntryDB'
+#region one-time setup. Install packages, IIS, and SQL Server.
 
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force;
 
@@ -50,14 +49,6 @@ choco install sql-server-express -y;
 #refresh the environment after package installation
 refreshenv;
 
-#Create Database
-Import-Module dbatools;
-$SqlInstance = Find-DbaInstance -computerName .;
-$db = New-DbaDatabase -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Name $DatabaseName -Owner 'sa';
-
-#endregion one-time setup. Install packages and install SQL Server.
-
-#region IIS Server setup and grant permissions in SQL Server
 #Turn on IIS
 Install-WindowsFeature -Name Web-Server -IncludeManagementTools;
 
@@ -67,12 +58,6 @@ Set-PSRepository -Name PSGallery -InstallationPolicy Trusted;
 Install-Module IISAdministration;
 Import-Module WebAdministration; #need that for the IIS: provider
 
-#Grant the IIS service account access to the data entry database
-New-DbaLogin -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
-New-DbaDbUser -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
-#Look, I didn't say this uses the principle of least permissions.
-Add-DbaDbRoleMember -Database $DatabaseName -Role 'db_owner' -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -User 'IIS APPPOOL\DefaultAppPool' -confirm:$false;
-
 #I think this is the right hosting bundle? Yes, I know it is 6.0, but it seems to be backwards compatible.
 $url = 'https://download.visualstudio.microsoft.com/download/pr/eaa3eab9-cc21-44b5-a4e4-af31ee73b9fa/d8ad75d525dec0a30b52adc990796b11/dotnet-hosting-6.0.9-win.exe';
 $file = "$home\outfile.exe";
@@ -81,7 +66,26 @@ Start-Process -FilePath $file -Wait -ArgumentList "/quiet","/install";
 net stop was /y;
 net start w3svc;
 
-#endregion IIS Server setup and grant permissions in SQL Server
+#endregion one-time setup. Install packages, IIS, and SQL Server.
+
+
+
+
+
+#region Create Database (OR skip this and restore one, adding a login for the DefaultAppPool if you need to)
+[String]$DatabaseName = 'DataEntryDB'
+Import-Module dbatools;
+$SqlInstance = Find-DbaInstance -computerName .;
+$db = New-DbaDatabase -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Name $DatabaseName -Owner 'sa';
+
+#Grant the IIS service account access to the data entry database
+New-DbaLogin -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
+New-DbaDbUser -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -Login 'IIS APPPOOL\DefaultAppPool';
+#Look, I didn't say this uses the principle of least permissions.
+Add-DbaDbRoleMember -Database $DatabaseName -Role 'db_owner' -SqlInstance "$($env:COMPUTERNAME)\$($SqlInstance.InstanceName)" -User 'IIS APPPOOL\DefaultAppPool' -confirm:$false;
+#endregion Create Database (OR skip this and restore one, adding a login for the DefaultAppPool if you need to)
+
+
 
 
 #region Prepare the SQL Server tables for data entry app(s)

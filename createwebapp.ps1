@@ -59,7 +59,7 @@ Install-Module IISAdministration;
 Import-Module WebAdministration; #need that for the IIS: provider
 
 #I think this is the right hosting bundle? Yes, I know it is 6.0, but it seems to be backwards compatible.
-$url = 'https://download.visualstudio.microsoft.com/download/pr/eaa3eab9-cc21-44b5-a4e4-af31ee73b9fa/d8ad75d525dec0a30b52adc990796b11/dotnet-hosting-6.0.9-win.exe';
+$url = 'https://dotnet.microsoft.com/permalink/dotnetcore-current-windows-runtime-bundle-installer';
 $file = "$home\outfile.exe";
 Invoke-WebRequest -Uri $url -OutFile $file;
 Start-Process -FilePath $file -Wait -ArgumentList "/quiet","/install";
